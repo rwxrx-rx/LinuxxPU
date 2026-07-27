@@ -3,27 +3,37 @@ name: Build LinuxxPU Kernel & Manager (Xiaomi Camellia)
 on:
   workflow_dispatch:
     inputs:
-      build_type:
-        description: 'Pilih jenis kompilasi'
-        required: true
-        default: 'build_all'
+      Build_type:
         type: choice
+        description: 'What should be built?'
+        default: 'build_all'
+        required: true
         options:
           - build_all
           - only_kernel
           - only_manager
 
       ksu_fork:
-        description: 'Which KSU fork should be used?'
-        required: true
-        default: 'xxksu'
         type: choice
+        description: 'Which ksu fork should be made?'
+        default: 'xxKSU'
+        required: true
         options:
-          - xxksu
-          - sukisu
-          - ksunext
+          - xxKSU
+          - SUKISU
 
-      # Opsi Support Additional Manager Signatures
+      kernel_variant:
+        description: 'Which kernel should be built ?'
+        required: true
+        type: choice
+        default: topnotchfreaks-codelinaro
+        options:
+          - common-android-mainline
+          - chickernel
+          - topnotchfreaks-codelinaro
+          - topnotchfreaks-google
+
+      # If you choose to support other manager signature, a default signature will be added automatically.
       additional_ksu_support:
         description: 'Support for additional managers?'
         required: true
@@ -41,27 +51,26 @@ on:
           - 'wild-ksun'
           - 'kowx712-ksu'
 
-      include_susfs:
-        description: 'Includes SUSFS patch (kernel-4.14)?'
+      clang_toolchain:
+        description: 'kernel: official from googlesource or latest custom from github?'
         required: true
-        default: true
-        type: boolean
-
-      toolchain_variant:
-        description: 'Toolchain Clang/LLVM variant'
-        required: true
-        default: 'aosp-clang-11'
         type: choice
+        default: 'custom_clang/llvm'
         options:
-          - 'aosp-clang-11'
-          - 'aosp-clang-12'
-          - 'proton-clang'
+          - 'official'
+          - 'custom_clang/llvm'
 
-      bbg_option:
-        description: 'BBG (Base Build Group / Custom flags)'
-        required: false
-        default: 'standard'
-        type: string
+      BBG:
+        required: true
+        type: boolean
+        default: false
+
+      # chickernel contains the susfs patch built into the source code
+      include_susfs:
+        description: Includes susfs patch
+        type: boolean
+        required: true
+        default: false
 
 jobs:
   calc_tag_version:
@@ -75,16 +84,13 @@ jobs:
           echo "tag=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
   build-kernel:
-    if: inputs.build_type == 'build_all' || inputs.build_type == 'only_kernel'
+    if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_kernel'
     runs-on: ubuntu-latest
     env:
       KERNEL_SOURCE: "https://github.com/rwxrx-rx/kernel_xiaomi_camellia"
       KERNEL_BRANCH: "main"
       KERNEL_DEFCONFIG: "camellia_defconfig"
       ARCH: "arm64"
-      KSU_FORK: ${{ inputs.ksu_fork }}
-      ADDITIONAL_KSU_SUPPORT: ${{ inputs.additional_ksu_support }}
-      USE_SUSFS: ${{ inputs.include_susfs }}
 
     steps:
       - name: Checkout Repository
@@ -95,14 +101,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev zip unzip git ccache
 
-      - name: Download Toolchain (${{ inputs.toolchain_variant }})
+      - name: Download Toolchain (${{ inputs.clang_toolchain }})
         run: |
           mkdir -p toolchain
           cd toolchain
           
-          if [ "${{ inputs.toolchain_variant }}" = "proton-clang" ]; then
+          if [ "${{ inputs.clang_toolchain }}" = "custom_clang/llvm" ]; then
+            echo "Mendownload Custom Clang/LLVM..."
             git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
           else
+            echo "Mendownload Official AOSP Clang..."
             wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
             mkdir clang && tar -xf clang-r383902.tar.gz -C clang
           fi
@@ -110,39 +118,33 @@ jobs:
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
-      - name: Clone Kernel Source
+      - name: Clone Kernel Source (${{ inputs.kernel_variant }})
         run: |
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel-source
 
       - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
         run: |
           cd kernel-source
-          
-          if [ "${{ inputs.ksu_fork }}" = "xxksu" ]; then
-            echo "Menggunakan xxKSU Fork..."
+          if [ "${{ inputs.ksu_fork }}" = "xxKSU" ]; then
+            echo "Setting up xxKSU..."
             curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/main/kernel/setup.sh" | bash -s main
-          elif [ "${{ inputs.ksu_fork }}" = "sukisu" ]; then
-            echo "Menggunakan SukiSU Fork..."
+          elif [ "${{ inputs.ksu_fork }}" = "SUKISU" ]; then
+            echo "Setting up SUKISU..."
             curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          else
-            echo "Menggunakan KernelSU-Next..."
-            curl -LSs "https://raw.githubusercontent.com/rifs33/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           fi
 
       - name: Apply Manager Signatures Support (${{ inputs.additional_ksu_support }})
         run: |
           cd kernel-source
-          echo "Menyetting dukungan signature manager: ${{ inputs.additional_ksu_support }}"
-          # Jika skrip pembantu signature kamu tersimpan di repo, panggil di sini
           if [ -f "../scripts/apply_signatures.sh" ]; then
             bash ../scripts/apply_signatures.sh "${{ inputs.additional_ksu_support }}"
           fi
 
-      - name: Apply SUSFS Patch (Kernel 4.14)
-        if: inputs.include_susfs == true
+      - name: Apply SUSFS Patch
+        if: inputs.include_susfs == true && inputs.kernel_variant != 'chickernel'
         run: |
           cd kernel-source
-          echo "Penerapan Patch SUSFS untuk 4.14..."
+          echo "Applying SUSFS patch to kernel source..."
           if [ -d "../patches/susfs_4.14" ]; then
             cp -r ../patches/susfs_4.14/* .
           fi
@@ -161,7 +163,7 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             LD=ld.lld
 
-      - name: Package with AnyKernel3 (Camellia)
+      - name: Package AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
           
@@ -176,16 +178,16 @@ jobs:
           fi
 
           cd AnyKernel3
-          zip -r9 ../LinuxxPU-Camellia-${{ inputs.ksu_fork }}.zip * -x .git README.md
+          zip -r9 ../LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip * -x .git README.md
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: LinuxxPU-Camellia-${{ inputs.ksu_fork }}
-          path: LinuxxPU-Camellia-${{ inputs.ksu_fork }}.zip
+          path: LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip
 
   build-manager:
-    if: inputs.build_type == 'build_all' || inputs.build_type == 'only_manager'
+    if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_manager'
     needs: calc_tag_version
     runs-on: ubuntu-latest
     steps:
@@ -256,6 +258,6 @@ jobs:
           
           gh release create "$TAG_NAME" final-assets/* \
             --title "LinuxxPU Kernel & Manager - $TAG_NAME" \
-            --notes "Build otomatis untuk Xiaomi Camellia (${{ inputs.ksu_fork }} | Manager Support: ${{ inputs.additional_ksu_support }})." \
+            --notes "Build otomatis Xiaomi Camellia (${{ inputs.ksu_fork }} | Variant: ${{ inputs.kernel_variant }})." \
             --clobber
             
