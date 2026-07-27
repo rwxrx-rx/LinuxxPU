@@ -23,6 +23,24 @@ on:
           - sukisu
           - ksunext
 
+      # Opsi Support Additional Manager Signatures
+      additional_ksu_support:
+        description: 'Support for additional managers?'
+        required: true
+        type: choice
+        default: 'All managers'
+        options:
+          - 'All managers'
+          - 'none'
+          - 'official'
+          - 'rsuntk'
+          - 'backslashxx'
+          - 'kernelsu-next'
+          - 'mksu'
+          - 'sukisu'
+          - 'wild-ksun'
+          - 'kowx712-ksu'
+
       include_susfs:
         description: 'Includes SUSFS patch (kernel-4.14)?'
         required: true
@@ -38,12 +56,6 @@ on:
           - 'aosp-clang-11'
           - 'aosp-clang-12'
           - 'proton-clang'
-
-      include_manager:
-        description: 'Support for additional managers?'
-        required: true
-        default: true
-        type: boolean
 
       bbg_option:
         description: 'BBG (Base Build Group / Custom flags)'
@@ -71,6 +83,7 @@ jobs:
       KERNEL_DEFCONFIG: "camellia_defconfig"
       ARCH: "arm64"
       KSU_FORK: ${{ inputs.ksu_fork }}
+      ADDITIONAL_KSU_SUPPORT: ${{ inputs.additional_ksu_support }}
       USE_SUSFS: ${{ inputs.include_susfs }}
 
     steps:
@@ -90,12 +103,10 @@ jobs:
           if [ "${{ inputs.toolchain_variant }}" = "proton-clang" ]; then
             git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
           else
-            # Default ke AOSP Clang yang kompatibel dengan Kernel 4.14 (r383902)
             wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
             mkdir clang && tar -xf clang-r383902.tar.gz -C clang
           fi
           
-          # GCC Cross Compilers
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
@@ -118,12 +129,20 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/rifs33/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           fi
 
+      - name: Apply Manager Signatures Support (${{ inputs.additional_ksu_support }})
+        run: |
+          cd kernel-source
+          echo "Menyetting dukungan signature manager: ${{ inputs.additional_ksu_support }}"
+          # Jika skrip pembantu signature kamu tersimpan di repo, panggil di sini
+          if [ -f "../scripts/apply_signatures.sh" ]; then
+            bash ../scripts/apply_signatures.sh "${{ inputs.additional_ksu_support }}"
+          fi
+
       - name: Apply SUSFS Patch (Kernel 4.14)
         if: inputs.include_susfs == true
         run: |
           cd kernel-source
           echo "Penerapan Patch SUSFS untuk 4.14..."
-          # Pastikan file patch 4.14 kamu dipanggil di sini jika ada di repo
           if [ -d "../patches/susfs_4.14" ]; then
             cp -r ../patches/susfs_4.14/* .
           fi
@@ -237,6 +256,6 @@ jobs:
           
           gh release create "$TAG_NAME" final-assets/* \
             --title "LinuxxPU Kernel & Manager - $TAG_NAME" \
-            --notes "Build otomatis untuk Xiaomi Camellia (${{ inputs.ksu_fork }})." \
+            --notes "Build otomatis untuk Xiaomi Camellia (${{ inputs.ksu_fork }} | Manager Support: ${{ inputs.additional_ksu_support }})." \
             --clobber
             
