@@ -13,6 +13,44 @@ on:
           - only_kernel
           - only_manager
 
+      ksu_fork:
+        description: 'Which KSU fork should be used?'
+        required: true
+        default: 'xxksu'
+        type: choice
+        options:
+          - xxksu
+          - sukisu
+          - ksunext
+
+      include_susfs:
+        description: 'Includes SUSFS patch (kernel-4.14)?'
+        required: true
+        default: true
+        type: boolean
+
+      toolchain_variant:
+        description: 'Toolchain Clang/LLVM variant'
+        required: true
+        default: 'aosp-clang-11'
+        type: choice
+        options:
+          - 'aosp-clang-11'
+          - 'aosp-clang-12'
+          - 'proton-clang'
+
+      include_manager:
+        description: 'Support for additional managers?'
+        required: true
+        default: true
+        type: boolean
+
+      bbg_option:
+        description: 'BBG (Base Build Group / Custom flags)'
+        required: false
+        default: 'standard'
+        type: string
+
 jobs:
   calc_tag_version:
     runs-on: ubuntu-latest
@@ -28,11 +66,12 @@ jobs:
     if: inputs.build_type == 'build_all' || inputs.build_type == 'only_kernel'
     runs-on: ubuntu-latest
     env:
-      # Ganti URL ini dengan repositori kernel source Xiaomi Camellia milikmu
       KERNEL_SOURCE: "https://github.com/rwxrx-rx/kernel_xiaomi_camellia"
       KERNEL_BRANCH: "main"
       KERNEL_DEFCONFIG: "camellia_defconfig"
       ARCH: "arm64"
+      KSU_FORK: ${{ inputs.ksu_fork }}
+      USE_SUSFS: ${{ inputs.include_susfs }}
 
     steps:
       - name: Checkout Repository
@@ -43,15 +82,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev zip unzip git ccache
 
-      - name: Download Toolchain (AOSP Clang & GCC 4.9 for Kernel 4.14)
+      - name: Download Toolchain (${{ inputs.toolchain_variant }})
         run: |
           mkdir -p toolchain
           cd toolchain
-          # Download Clang r383902 (Clang 11/12 ideal untuk Kernel 4.14 Non-GKI)
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
-          mkdir clang && tar -xf clang-r383902.tar.gz -C clang
           
-          # Cross-compilers GCC
+          if [ "${{ inputs.toolchain_variant }}" = "proton-clang" ]; then
+            git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+          else
+            # Default ke AOSP Clang yang kompatibel dengan Kernel 4.14 (r383902)
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
+            mkdir clang && tar -xf clang-r383902.tar.gz -C clang
+          fi
+          
+          # GCC Cross Compilers
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
@@ -59,11 +103,30 @@ jobs:
         run: |
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel-source
 
-      - name: Setup KernelSU-Next / xxKSU Driver
+      - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
         run: |
           cd kernel-source
-          # Integrasi KernelSU-Next untuk Non-GKI 4.14
-          curl -LSs "https://raw.githubusercontent.com/rifs33/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          
+          if [ "${{ inputs.ksu_fork }}" = "xxksu" ]; then
+            echo "Menggunakan xxKSU Fork..."
+            curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/main/kernel/setup.sh" | bash -s main
+          elif [ "${{ inputs.ksu_fork }}" = "sukisu" ]; then
+            echo "Menggunakan SukiSU Fork..."
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          else
+            echo "Menggunakan KernelSU-Next..."
+            curl -LSs "https://raw.githubusercontent.com/rifs33/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          fi
+
+      - name: Apply SUSFS Patch (Kernel 4.14)
+        if: inputs.include_susfs == true
+        run: |
+          cd kernel-source
+          echo "Penerapan Patch SUSFS untuk 4.14..."
+          # Pastikan file patch 4.14 kamu dipanggil di sini jika ada di repo
+          if [ -d "../patches/susfs_4.14" ]; then
+            cp -r ../patches/susfs_4.14/* .
+          fi
 
       - name: Build Kernel Image
         run: |
@@ -79,16 +142,14 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             LD=ld.lld
 
-      - name: Package with AnyKernel3 (Xiaomi Camellia Config)
+      - name: Package with AnyKernel3 (Camellia)
         run: |
           git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
           
-          # Konfigurasi spesifik Camellia
           sed -i 's/device.name1=.*/device.name1=camellia/' AnyKernel3/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=camellian/' AnyKernel3/anykernel.sh
           sed -i 's|block=.*|block=/dev/block/by-name/boot|' AnyKernel3/anykernel.sh
           
-          # Salin hasil kompilasi kernel
           if [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
             cp kernel-source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           elif [ -f kernel-source/out/arch/arm64/boot/Image.gz ]; then
@@ -96,13 +157,13 @@ jobs:
           fi
 
           cd AnyKernel3
-          zip -r9 ../LinuxxPU-Camellia-Kernel.zip * -x .git README.md
+          zip -r9 ../LinuxxPU-Camellia-${{ inputs.ksu_fork }}.zip * -x .git README.md
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinuxxPU-Camellia-Kernel
-          path: LinuxxPU-Camellia-Kernel.zip
+          name: LinuxxPU-Camellia-${{ inputs.ksu_fork }}
+          path: LinuxxPU-Camellia-${{ inputs.ksu_fork }}.zip
 
   build-manager:
     if: inputs.build_type == 'build_all' || inputs.build_type == 'only_manager'
@@ -171,13 +232,11 @@ jobs:
         run: |
           TAG_NAME="${{ needs.calc_tag_version.outputs.tag }}"
           
-          # Kumpulkan semua file zip dan apk
           mkdir -p final-assets
           find release-assets -type f \( -name "*.zip" -o -name "*.apk" \) -exec cp {} final-assets/ \;
           
-          echo "Membuat Release $TAG_NAME..."
           gh release create "$TAG_NAME" final-assets/* \
             --title "LinuxxPU Kernel & Manager - $TAG_NAME" \
-            --notes "Build otomatis KernelSU-Next & SUSFS untuk Xiaomi Camellia (MT6833 4.14)." \
+            --notes "Build otomatis untuk Xiaomi Camellia (${{ inputs.ksu_fork }})." \
             --clobber
             
