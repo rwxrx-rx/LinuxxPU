@@ -1,7 +1,4 @@
 name: MY Non-GKI Kernel Build
-permissions:
-  contents: write
-  actions: write
 
 on:
   workflow_call:
@@ -97,7 +94,6 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           fi
 
-          # Patch Kprobes secara aman jika core_hook.c ada
           HOOK_FILE="drivers/kernelsu/core_hook.c"
           if [ -f "$HOOK_FILE" ]; then
             sed -i 's/#ifdef CONFIG_KPROBES/#if 0/g' "$HOOK_FILE"
