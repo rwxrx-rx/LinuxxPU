@@ -1,172 +1,193 @@
-name: Build LinuxxPU Kernel & Manager (Xiaomi Camellia)
+name: MY Non-GKI Kernel Build
+permissions:
+  contents: write
+  actions: write
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      Build_type:
-        type: choice
-        description: 'What should be built?'
-        default: 'build_all'
-        required: true
-        options:
-          - build_all
-          - only_kernel
-          - only_manager
-
-      ksu_fork:
-        type: choice
-        description: 'Which ksu fork should be made?'
-        default: 'xxKSU'
-        required: true
-        options:
-          - xxKSU
-          - SUKISU
-
       kernel_variant:
-        description: 'Which kernel should be built?'
         required: true
-        type: choice
-        default: xiaomi-camellia
-        options:
-          - xiaomi-camellia
-          - flyme
-          - vortex-v1
-          - vortex-test
-          - lineage-23.2
-
-      additional_ksu_support:
-        description: 'Support for additional managers?'
+        type: string
+      ksu_fork:
         required: true
-        type: choice
-        default: 'All managers'
-        options:
-          - 'All managers'
-          - 'none'
-          - 'official'
-          - 'rsuntk'
-          - 'backslashxx'
-          - 'kernelsu-next'
-          - 'mksu'
-          - 'sukisu'
-          - 'wild-ksun'
-          - 'kowx712-ksu'
-
-      clang_toolchain:
-        description: 'Kernel Toolchain (official AOSP or proton-clang)'
-        required: true
-        type: choice
-        default: 'custom_clang/llvm'
-        options:
-          - 'official'
-          - 'custom_clang/llvm'
-
-      BBG:
-        description: 'Include Baseband-Guard (BBG)'
-        required: true
-        type: boolean
-        default: false
-
+        type: string
       include_susfs:
-        description: 'Include SUSFS patch & configs'
-        type: boolean
         required: true
+        type: boolean
+      clang_toolchain:
+        required: true
+        type: string
+      manager_supports:
+        required: true
+        type: string
+      BBG:
+        required: true
+        type: boolean
         default: false
 
 jobs:
-  calc_tag_version:
+  build-kernel-kernelsu:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.gen_tag.outputs.tag }}
-    steps:
-      - name: Generate Tag Version
-        id: gen_tag
-        run: |
-          echo "tag=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
+    timeout-minutes: 60
+    env:
+      ARCH: "arm64"
+      KERNEL_DEFCONFIG: "camellia_defconfig"
 
-  # Memanggil Reusable Workflow MY-gki-kernel.yml untuk Build Kernel Non-GKI
-  call-kernel-build:
-    if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_kernel'
-    uses: ./.github/workflows/MY-gki-kernel.yml
-    with:
-      kernel_variant: ${{ inputs.kernel_variant }}
-      ksu_fork: ${{ inputs.ksu_fork }}
-      include_susfs: ${{ inputs.include_susfs }}
-      clang_toolchain: ${{ inputs.clang_toolchain }}
-      manager_supports: ${{ inputs.additional_ksu_support }}
-      BBG: ${{ inputs.BBG }}
-
-  build-manager:
-    if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_manager'
-    needs: calc_tag_version
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
         with:
-          distribution: temurin
-          java-version: 21
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Force Fix AIDL Directory Structure
+      - name: Setup Build Dependencies
         run: |
-          echo "=== FIX AIDL DIRECTORY ==="
-          AIDL_BASE="manager/app/src/main/aidl"
+          sudo apt purge -y man-db /var/lib/man-db/auto-update || true
+          sudo apt update -qq
+          sudo apt install -y build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev zip unzip git ccache curl aria2
+
+      - name: Download Toolchain (${{ inputs.clang_toolchain }})
+        run: |
+          mkdir -p toolchain
+          cd toolchain
           
-          if [ -d "$AIDL_BASE" ]; then
-            find "$AIDL_BASE" -type f -name "*.aidl" -exec sed -i 's/\r$//' {} +
-            
-            OLD_DIR="$AIDL_BASE/me/weishu/kernelsu"
-            NEW_DIR="$AIDL_BASE/com/ahmad/linuxxpu"
-            
-            if [ -d "$OLD_DIR" ]; then
-              mkdir -p "$NEW_DIR"
-              mv "$OLD_DIR"/* "$NEW_DIR"/ 2>/dev/null || true
-              rm -rf "$AIDL_BASE/me"
-            fi
-            
-            find "$AIDL_BASE" -type d -empty -delete
+          if [ "${{ inputs.clang_toolchain }}" = "custom_clang/llvm" ]; then
+            echo "Mendownload Custom Clang/LLVM (Proton-Clang)..."
+            git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+          else
+            echo "Mendownload Official AOSP Clang..."
+            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
+            mkdir clang && tar -xf clang-r383902.tar.gz -C clang
           fi
+          
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
-      - name: Build Manager APK
-        working-directory: ./manager
+      - name: Install Repo Tool & Sync Kernel via Manifest (${{ inputs.kernel_variant }})
         run: |
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew clean assembleRelease
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+rx ~/.bin/repo
+          export PATH=~/.bin:$PATH
+
+          MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
+          echo "Memuat manifest: $MANIFEST_NAME"
+
+          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m "manifests/$MANIFEST_NAME" --depth=1
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+
+      - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
+        run: |
+          cd kernel-source
+          if [ "${{ inputs.ksu_fork }}" = "xxKSU" ]; then
+            echo "Setting up xxKSU..."
+            curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/main/kernel/setup.sh" | bash -s main
+          elif [ "${{ inputs.ksu_fork }}" = "SUKISU" ]; then
+            echo "Setting up SUKISU..."
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           fi
 
-      - name: Upload Manager Artifact
+          # Patch Kprobes secara aman jika core_hook.c ada
+          HOOK_FILE="drivers/kernelsu/core_hook.c"
+          if [ -f "$HOOK_FILE" ]; then
+            sed -i 's/#ifdef CONFIG_KPROBES/#if 0/g' "$HOOK_FILE"
+          fi
+
+      - name: Apply Manager Signatures Support (${{ inputs.manager_supports }})
+        run: |
+          cd kernel-source
+          if [ -f "../scripts/apply_signatures.sh" ]; then
+            bash ../scripts/apply_signatures.sh "${{ inputs.manager_supports }}"
+          fi
+
+      - name: Add Baseband-Guard (BBG)
+        if: inputs.BBG == true
+        run: |
+          cd kernel-source
+          echo "Adding Baseband-guard..."
+          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash || true
+          echo "CONFIG_BBG=y" >> arch/arm64/configs/$KERNEL_DEFCONFIG
+
+      - name: Apply SUSFS Patch & Configs
+        if: inputs.include_susfs == true
+        run: |
+          cd kernel-source
+          echo "Applying SUSFS patch to Non-GKI kernel source..."
+          if [ -d "../patches/susfs_4.14" ]; then
+            cp -r ../patches/susfs_4.14/* .
+          fi
+
+          DEFCONFIG_FILE="arch/arm64/configs/$KERNEL_DEFCONFIG"
+          echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> $DEFCONFIG_FILE
+
+      - name: Configure Kernel Defconfig
+        run: |
+          cd kernel-source
+          DEFCONFIG_FILE="arch/arm64/configs/$KERNEL_DEFCONFIG"
+          
+          echo "CONFIG_KSU=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> $DEFCONFIG_FILE
+
+      - name: Build Kernel Image
+        run: |
+          cd kernel-source
+          export PATH=$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc64/bin:$GITHUB_WORKSPACE/toolchain/gcc32/bin:$PATH
+          
+          make O=out ARCH=${{ env.ARCH }} $KERNEL_DEFCONFIG
+          make -j$(nproc --all) O=out \
+            ARCH=${{ env.ARCH }} \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LD=ld.lld
+
+      - name: Package AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          
+          sed -i 's/device.name1=.*/device.name1=camellia/' AnyKernel3/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=camellian/' AnyKernel3/anykernel.sh
+          sed -i 's|block=.*|block=/dev/block/by-name/boot|' AnyKernel3/anykernel.sh
+          
+          if [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel-source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          elif [ -f kernel-source/out/arch/arm64/boot/Image.gz ]; then
+            cp kernel-source/out/arch/arm64/boot/Image.gz AnyKernel3/
+          fi
+
+          cd AnyKernel3
+          zip -r9 ../LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip * -x .git README.md
+
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinuxxPU-Manager-APK
-          path: manager/app/build/outputs/apk/release/*.apk
-
-  publish-release:
-    needs: [calc_tag_version, call-kernel-build, build-manager]
-    if: always() && (needs.call-kernel-build.result == 'success' || needs.build-manager.result == 'success')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-
-      - name: Create GitHub Release via GH CLI
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG_NAME="${{ needs.calc_tag_version.outputs.tag }}"
+          name: LinuxxPU-Camellia-${{ inputs.ksu_fork }}
+          path: LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip
           
-          mkdir -p final-assets
-          find release-assets -type f \( -name "*.zip" -o -name "*.apk" \) -exec cp {} final-assets/ \;
-          
-          gh release create "$TAG_NAME" final-assets/* \
-            --title "LinuxxPU Kernel & Manager - $TAG_NAME" \
-            --notes "Build otomatis Xiaomi Camellia (${{ inputs.ksu_fork }} | Variant: ${{ inputs.kernel_variant }})." \
-            --clobber
-            
