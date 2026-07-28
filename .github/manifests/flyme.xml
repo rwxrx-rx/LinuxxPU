@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="github" fetch="https://github.com/" />
+
+  <!-- Repo Kernel Utama Xiaomi Camellia -->
+  <project path="kernel-source" name="camellia-devs/kernel_xiaomi_mt6833" remote="github" revision="flyme" />
+
+  <!-- (Opsional) Jika kamu ingin memasukkan toolchain/driver tambahan via manifest -->
+  <!-- <project path="toolchain/clang" name="kdrag0n/proton-clang" remote="github" revision="master" clone-depth="1" /> -->
+</manifest>
