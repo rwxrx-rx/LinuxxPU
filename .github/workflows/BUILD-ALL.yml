@@ -26,13 +26,14 @@ on:
         description: 'Which kernel should be built ?'
         required: true
         type: choice
-        default: topnotchfreaks-codelinaro
+        default: xiaomi-camellia
         options:
-          - common-android-mainline
-          - chickernel
-          - topnotchfreaks-codelinaro
-          - topnotchfreaks-google
-
+          - xiaomi-camellia
+          - flyme
+          - vortex-v1
+          - vortex-test
+          - lineage-23.2
+          
       # If you choose to support other manager signature, a default signature will be added automatically.
       additional_ksu_support:
         description: 'Support for additional managers?'
