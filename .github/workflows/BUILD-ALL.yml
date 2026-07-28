@@ -66,7 +66,6 @@ on:
         type: boolean
         default: false
 
-      # chickernel contains the susfs patch built into the source code
       include_susfs:
         description: Includes susfs patch
         type: boolean
@@ -88,9 +87,6 @@ jobs:
     if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_kernel'
     runs-on: ubuntu-latest
     env:
-      KERNEL_SOURCE: "https://github.com/rwxrx-rx/kernel_xiaomi_camellia"
-      KERNEL_BRANCH: "main"
-      KERNEL_DEFCONFIG: "camellia_defconfig"
       ARCH: "arm64"
 
     steps:
@@ -119,9 +115,20 @@ jobs:
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
-      - name: Clone Kernel Source (${{ inputs.kernel_variant }})
+      - name: Install Repo Tool & Sync Kernel via Manifest (${{ inputs.kernel_variant }})
         run: |
-          git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel-source
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+rx ~/.bin/repo
+          export PATH=~/.bin:$PATH
+
+          MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
+          echo "Memuat manifest: $MANIFEST_NAME"
+
+          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m "manifests/$MANIFEST_NAME" --depth=1
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+
+          echo "KERNEL_DEFCONFIG=camellia_defconfig" >> $GITHUB_ENV
 
       - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
         run: |
@@ -142,7 +149,7 @@ jobs:
           fi
 
       - name: Apply SUSFS Patch
-        if: inputs.include_susfs == true && inputs.kernel_variant != 'chickernel'
+        if: inputs.include_susfs == true
         run: |
           cd kernel-source
           echo "Applying SUSFS patch to kernel source..."
@@ -155,7 +162,7 @@ jobs:
           cd kernel-source
           export PATH=$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc64/bin:$GITHUB_WORKSPACE/toolchain/gcc32/bin:$PATH
           
-          make O=out ARCH=${{ env.ARCH }} ${{ env.KERNEL_DEFCONFIG }}
+          make O=out ARCH=${{ env.ARCH }} $KERNEL_DEFCONFIG
           make -j$(nproc --all) O=out \
             ARCH=${{ env.ARCH }} \
             CC=clang \
