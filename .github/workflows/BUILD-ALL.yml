@@ -99,6 +99,7 @@ jobs:
       manager_supports: ${{ inputs.additional_ksu_support }}
       BBG: ${{ inputs.BBG }}
 
+
   build-manager:
     if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_manager'
     needs: calc_tag_version
@@ -135,13 +136,19 @@ jobs:
             
             find "$AIDL_BASE" -type d -empty -delete
           fi
-
+          
       - name: Build Manager APK
-        working-directory: ./manager
         run: |
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew clean assembleRelease
+          if [ -d "manager" ]; then
+            cd manager
+            if [ -f gradlew ]; then
+              chmod +x gradlew
+              ./gradlew clean assembleRelease
+            else
+              echo "File gradlew tidak ditemukan di dalam folder manager!"
+            fi
+          else
+            echo "Folder 'manager' tidak ditemukan di root repository!"
           fi
 
       - name: Upload Manager Artifact
