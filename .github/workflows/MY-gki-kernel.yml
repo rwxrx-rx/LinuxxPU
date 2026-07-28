@@ -77,13 +77,14 @@ jobs:
           chmod a+rx ~/.bin/repo
           export PATH=~/.bin:$PATH
 
-          # Konfigurasi autentikasi Git otomatis agar repo init bisa membaca Private Repo/Manifest
+          # Konfigurasi autentikasi Git
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
           MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
-          echo "Memuat manifest: $MANIFEST_NAME"
+          echo "Memuat manifest dari .github/manifest/: $MANIFEST_NAME"
 
-          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m "manifests/$MANIFEST_NAME" --depth=1
+          # Path diubah dari 'manifests/' ke '.github/manifest/'
+          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m ".github/manifest/$MANIFEST_NAME" --depth=1
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
 
       - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
