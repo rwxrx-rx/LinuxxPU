@@ -77,14 +77,19 @@ jobs:
           chmod a+rx ~/.bin/repo
           export PATH=~/.bin:$PATH
 
-          # Konfigurasi autentikasi Git
+          MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
+          echo "Memuat manifest lokal dari: .github/manifest/$MANIFEST_NAME"
+
+          # 1. Inisialisasi struktur repo
+          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main --depth=1
+
+          # 2. Salin manifest hasil checkout ke folder .repo/manifests/ sebagai default.xml
+          cp "$GITHUB_WORKSPACE/.github/manifest/$MANIFEST_NAME" .repo/manifests/default.xml
+
+          # 3. Autentikasi git agar repo sync bisa clone repo private di dalam XML
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
-          MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
-          echo "Memuat manifest dari .github/manifest/: $MANIFEST_NAME"
-
-          # Path diubah dari 'manifests/' ke '.github/manifest/'
-          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m ".github/manifest/$MANIFEST_NAME" --depth=1
+          # 4. Sync source code kernel
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
 
       - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
