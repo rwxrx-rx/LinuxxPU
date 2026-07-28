@@ -1,5 +1,10 @@
 name: Build LinuxxPU Kernel & Manager (Xiaomi Camellia)
 
+# Tambahkan hak akses di sini agar diwariskan ke MY-gki-kernel.yml
+permissions:
+  contents: write
+  actions: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +17,7 @@ on:
           - build_all
           - only_kernel
           - only_manager
-
+          
       ksu_fork:
         type: choice
         description: 'Which ksu fork should be made?'
