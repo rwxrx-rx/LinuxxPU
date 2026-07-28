@@ -1,6 +1,6 @@
 name: Build LinuxxPU Kernel & Manager (Xiaomi Camellia)
 
-# Tambahkan hak akses di sini agar diwariskan ke MY-gki-kernel.yml
+# Memberikan izin write ke caller workflow agar diwarisi oleh MY-gki-kernel.yml
 permissions:
   contents: write
   actions: write
@@ -17,7 +17,7 @@ on:
           - build_all
           - only_kernel
           - only_manager
-          
+
       ksu_fork:
         type: choice
         description: 'Which ksu fork should be made?'
@@ -88,7 +88,6 @@ jobs:
         run: |
           echo "tag=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
-  # Memanggil Reusable Workflow MY-gki-kernel.yml untuk Build Kernel Non-GKI
   call-kernel-build:
     if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_kernel'
     uses: ./.github/workflows/MY-gki-kernel.yml
