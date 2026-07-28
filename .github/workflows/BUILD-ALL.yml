@@ -23,7 +23,7 @@ on:
           - SUKISU
 
       kernel_variant:
-        description: 'Which kernel should be built ?'
+        description: 'Which kernel should be built?'
         required: true
         type: choice
         default: xiaomi-camellia
@@ -33,8 +33,7 @@ on:
           - vortex-v1
           - vortex-test
           - lineage-23.2
-          
-      # If you choose to support other manager signature, a default signature will be added automatically.
+
       additional_ksu_support:
         description: 'Support for additional managers?'
         required: true
@@ -53,7 +52,7 @@ on:
           - 'kowx712-ksu'
 
       clang_toolchain:
-        description: 'kernel: official from googlesource or latest custom from github?'
+        description: 'Kernel Toolchain (official AOSP or proton-clang)'
         required: true
         type: choice
         default: 'custom_clang/llvm'
@@ -62,12 +61,13 @@ on:
           - 'custom_clang/llvm'
 
       BBG:
+        description: 'Include Baseband-Guard (BBG)'
         required: true
         type: boolean
         default: false
 
       include_susfs:
-        description: Includes susfs patch
+        description: 'Include SUSFS patch & configs'
         type: boolean
         required: true
         default: false
@@ -83,116 +83,17 @@ jobs:
         run: |
           echo "tag=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
-  build-kernel:
+  # Memanggil Reusable Workflow MY-gki-kernel.yml untuk Build Kernel Non-GKI
+  call-kernel-build:
     if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_kernel'
-    runs-on: ubuntu-latest
-    env:
-      ARCH: "arm64"
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev zip unzip git ccache
-
-      - name: Download Toolchain (${{ inputs.clang_toolchain }})
-        run: |
-          mkdir -p toolchain
-          cd toolchain
-          
-          if [ "${{ inputs.clang_toolchain }}" = "custom_clang/llvm" ]; then
-            echo "Mendownload Custom Clang/LLVM..."
-            git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
-          else
-            echo "Mendownload Official AOSP Clang..."
-            wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz
-            mkdir clang && tar -xf clang-r383902.tar.gz -C clang
-          fi
-          
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
-
-      - name: Install Repo Tool & Sync Kernel via Manifest (${{ inputs.kernel_variant }})
-        run: |
-          mkdir -p ~/.bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-          chmod a+rx ~/.bin/repo
-          export PATH=~/.bin:$PATH
-
-          MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
-          echo "Memuat manifest: $MANIFEST_NAME"
-
-          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main -m "manifests/$MANIFEST_NAME" --depth=1
-          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
-
-          echo "KERNEL_DEFCONFIG=camellia_defconfig" >> $GITHUB_ENV
-
-      - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
-        run: |
-          cd kernel-source
-          if [ "${{ inputs.ksu_fork }}" = "xxKSU" ]; then
-            echo "Setting up xxKSU..."
-            curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/main/kernel/setup.sh" | bash -s main
-          elif [ "${{ inputs.ksu_fork }}" = "SUKISU" ]; then
-            echo "Setting up SUKISU..."
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          fi
-
-      - name: Apply Manager Signatures Support (${{ inputs.additional_ksu_support }})
-        run: |
-          cd kernel-source
-          if [ -f "../scripts/apply_signatures.sh" ]; then
-            bash ../scripts/apply_signatures.sh "${{ inputs.additional_ksu_support }}"
-          fi
-
-      - name: Apply SUSFS Patch
-        if: inputs.include_susfs == true
-        run: |
-          cd kernel-source
-          echo "Applying SUSFS patch to kernel source..."
-          if [ -d "../patches/susfs_4.14" ]; then
-            cp -r ../patches/susfs_4.14/* .
-          fi
-
-      - name: Build Kernel Image
-        run: |
-          cd kernel-source
-          export PATH=$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc64/bin:$GITHUB_WORKSPACE/toolchain/gcc32/bin:$PATH
-          
-          make O=out ARCH=${{ env.ARCH }} $KERNEL_DEFCONFIG
-          make -j$(nproc --all) O=out \
-            ARCH=${{ env.ARCH }} \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            LD=ld.lld
-
-      - name: Package AnyKernel3
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
-          
-          sed -i 's/device.name1=.*/device.name1=camellia/' AnyKernel3/anykernel.sh
-          sed -i 's/device.name2=.*/device.name2=camellian/' AnyKernel3/anykernel.sh
-          sed -i 's|block=.*|block=/dev/block/by-name/boot|' AnyKernel3/anykernel.sh
-          
-          if [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp kernel-source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          elif [ -f kernel-source/out/arch/arm64/boot/Image.gz ]; then
-            cp kernel-source/out/arch/arm64/boot/Image.gz AnyKernel3/
-          fi
-
-          cd AnyKernel3
-          zip -r9 ../LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip * -x .git README.md
-
-      - name: Upload Kernel Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: LinuxxPU-Camellia-${{ inputs.ksu_fork }}
-          path: LinuxxPU-Camellia-${{ inputs.ksu_fork }}-${{ inputs.kernel_variant }}.zip
+    uses: ./.github/workflows/MY-gki-kernel.yml
+    with:
+      kernel_variant: ${{ inputs.kernel_variant }}
+      ksu_fork: ${{ inputs.ksu_fork }}
+      include_susfs: ${{ inputs.include_susfs }}
+      clang_toolchain: ${{ inputs.clang_toolchain }}
+      manager_supports: ${{ inputs.additional_ksu_support }}
+      BBG: ${{ inputs.BBG }}
 
   build-manager:
     if: inputs.Build_type == 'build_all' || inputs.Build_type == 'only_manager'
@@ -246,8 +147,8 @@ jobs:
           path: manager/app/build/outputs/apk/release/*.apk
 
   publish-release:
-    needs: [calc_tag_version, build-kernel, build-manager]
-    if: always() && (needs.build-kernel.result == 'success' || needs.build-manager.result == 'success')
+    needs: [calc_tag_version, call-kernel-build, build-manager]
+    if: always() && (needs.call-kernel-build.result == 'success' || needs.build-manager.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Download All Artifacts
