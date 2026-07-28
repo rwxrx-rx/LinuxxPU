@@ -80,16 +80,27 @@ jobs:
           MANIFEST_NAME="${{ inputs.kernel_variant }}.xml"
           echo "Memuat manifest lokal dari: .github/manifest/$MANIFEST_NAME"
 
-          # 1. Inisialisasi struktur repo
-          repo init -u https://github.com/rwxrx-rx/LinuxxPU.git -b main --depth=1
+          # 1. Buat folder lokal sementara untuk repositori manifest
+          mkdir -p local-manifest
+          cp "$GITHUB_WORKSPACE/.github/manifest/$MANIFEST_NAME" local-manifest/default.xml
 
-          # 2. Salin manifest hasil checkout ke folder .repo/manifests/ sebagai default.xml
-          cp "$GITHUB_WORKSPACE/.github/manifest/$MANIFEST_NAME" .repo/manifests/default.xml
+          # 2. Inisialisasi sebagai git repo lokal agar dikenali oleh tool repo
+          cd local-manifest
+          git init
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add default.xml
+          git commit -m "Local manifest initialization"
+          git branch -M main
+          cd ..
 
-          # 3. Autentikasi git agar repo sync bisa clone repo private di dalam XML
+          # 3. Inisialisasi repo dari folder git lokal yang baru dibuat
+          repo init -u ./local-manifest -b main
+
+          # 4. Konfigurasi autentikasi git agar repo sync bisa clone repo private/public
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
-          # 4. Sync source code kernel
+          # 5. Sync source code kernel
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
 
       - name: Setup Selected KSU Fork (${{ inputs.ksu_fork }})
